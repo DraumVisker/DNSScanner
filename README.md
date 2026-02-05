@@ -1,6 +1,3 @@
-Here is a complete **README.md** you can place in the project root.
-
----
 
 # DNSScanner
 
