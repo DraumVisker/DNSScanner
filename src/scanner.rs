@@ -1,100 +1,106 @@
 use std::fs::File;
 use std::io::Write;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+use std::sync::Arc;
 
 use tokio::net::UdpSocket;
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::{Semaphore, Mutex};
 use tokio::time::{timeout, Duration};
 
 pub async fn run_scan(
     targets: Vec<Ipv4Addr>,
-    resolver: String,
+    resolvers: Vec<String>,
     concurrency: usize,
     output_file: String,
 ) {
     let semaphore = Arc::new(Semaphore::new(concurrency));
-    let live_counter = Arc::new(AtomicUsize::new(0));
+    let file = Arc::new(Mutex::new(File::create(output_file).unwrap()));
+    let live_counter = Arc::new(Mutex::new(0usize));
 
-    let (tx, mut rx) = mpsc::channel::<Ipv4Addr>(10000);
+    let mut tasks = Vec::new();
 
-    // Writer Task
-    let counter_clone = live_counter.clone();
-    tokio::spawn(async move {
-        let mut file = File::create(output_file).expect("Cannot create output file");
-
-        while let Some(ip) = rx.recv().await {
-            println!("[LIVE] {}", ip);
-            writeln!(file, "{}", ip).ok();
-            counter_clone.fetch_add(1, Ordering::Relaxed);
-        }
-    });
-
-    // Spawn scan tasks
     for ip in targets {
         let permit = semaphore.clone().acquire_owned().await.unwrap();
-        let tx_clone = tx.clone();
-        let resolver_clone = resolver.clone();
+        let file = file.clone();
+        let counter = live_counter.clone();
+        let resolvers = resolvers.clone();
 
-        tokio::spawn(async move {
-            let _p = permit;
+        tasks.push(tokio::spawn(async move {
+            let _permit = permit;
 
-            if query_dns(ip, &resolver_clone).await {
-                tx_clone.send(ip).await.ok();
+            if check_dns(ip, &resolvers).await {
+                println!("[DNS] {}", ip);
+
+                {
+                    let mut f = file.lock().await;
+                    writeln!(f, "{}", ip).ok();
+                }
+
+                let mut c = counter.lock().await;
+                *c += 1;
             }
-        });
+        }));
     }
 
-    drop(tx);
+    for t in tasks {
+        let _ = t.await;
+    }
 
-    // Give tasks time to finish
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
-    println!(
-        "\nScan complete. Total LIVE DNS: {}",
-        live_counter.load(Ordering::Relaxed)
-    );
+    let total = *live_counter.lock().await;
+    println!("\nTotal live DNS servers: {}", total);
 }
 
-async fn query_dns(ip: Ipv4Addr, resolver: &str) -> bool {
+async fn check_dns(ip: Ipv4Addr, _resolvers: &[String]) -> bool {
     let socket = match UdpSocket::bind("0.0.0.0:0").await {
         Ok(s) => s,
         Err(_) => return false,
     };
 
-    let resolver_addr: SocketAddr =
-        format!("{}:53", resolver).parse().expect("Invalid resolver");
+    let addr: SocketAddr = format!("{}:53", ip).parse().unwrap();
+    let query = build_dns_query();
 
-    let packet = build_dns_packet();
+    for _ in 0..3 {
+        let _ = socket.send_to(&query, addr).await;
 
-    if socket.send_to(&packet, resolver_addr).await.is_err() {
-        return false;
+        let mut buf = [0u8; 512];
+
+        let result = timeout(Duration::from_secs(3), socket.recv_from(&mut buf)).await;
+
+        if let Ok(Ok((size, _))) = result {
+            if size > 12 {
+                let flags = buf[2];
+                let rcode = buf[3] & 0x0F;
+
+                if flags & 0x80 == 0x80 && rcode == 0 {
+                    return true;
+                }
+            }
+        }
     }
 
-    let mut buf = [0u8; 512];
-
-    match timeout(Duration::from_secs(2), socket.recv_from(&mut buf)).await {
-        Ok(Ok(_)) => true,
-        _ => false,
-    }
+    false
 }
 
-fn build_dns_packet() -> Vec<u8> {
-    vec![
+fn build_dns_query() -> Vec<u8> {
+    let mut packet = vec![
         0x12, 0x34,
         0x01, 0x00,
         0x00, 0x01,
         0x00, 0x00,
         0x00, 0x00,
         0x00, 0x00,
-        0x03, b'w', b'w', b'w',
+    ];
+
+    packet.extend(&[
         0x06, b'g', b'o', b'o', b'g', b'l', b'e',
         0x03, b'c', b'o', b'm',
         0x00,
+    ]);
+
+    packet.extend(&[
         0x00, 0x01,
         0x00, 0x01,
-    ]
+    ]);
+
+    packet
 }
