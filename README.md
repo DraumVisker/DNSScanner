@@ -1,30 +1,37 @@
-
 # DNSScanner
 
-High‑speed asynchronous DNS discovery tool written in Rust.
-This scanner detects **live DNS servers** by sending UDP DNS queries concurrently and records responding servers to a file.
+High-performance asynchronous DNS discovery tool written in Rust.
+DNSScanner detects **live DNS servers** by sending concurrent UDP DNS queries and recording responding servers.
 
-The project supports:
+This tool is designed for **large-scale DNS infrastructure discovery**, **network research**, and **security laboratory environments**.
 
+---
+
+## Features
+
+* Asynchronous UDP DNS probing
+* High-speed concurrent scanning (Tokio runtime)
 * Single IP scanning
 * CIDR range scanning
-* File‑based IP list scanning
-* Async high‑speed probing using Tokio
-* Automatic output of live DNS servers
-* Live DNS counter display
+* File-based target scanning
+* Real-time live DNS detection output
+* Automatic result saving to file
+* Final live DNS counter summary
+* Lightweight and fast Rust implementation
 
-
+---
 
 ## Project Structure
 
 ```
 DNSScanner/
- ├── Cargo.toml
- ├── README.md
- └── src/
-     ├── main.rs
-     ├── scanner.rs
-     └── ip_utils.rs
+├── Cargo.toml
+├── dnsForTest.txt
+├── live_dns.txt
+└── src/
+    ├── main.rs
+    ├── scanner.rs
+    └── ip_utils.rs
 ```
 
 ---
@@ -34,7 +41,7 @@ DNSScanner/
 * Rust 1.70+
 * Cargo
 
-Install Rust if needed:
+Install Rust:
 
 ```bash
 curl https://sh.rustup.rs -sSf | sh
@@ -44,7 +51,7 @@ curl https://sh.rustup.rs -sSf | sh
 
 ## Build
 
-Release build recommended for performance:
+For maximum performance use release mode:
 
 ```bash
 cargo build --release
@@ -60,25 +67,25 @@ target/release/DNSScanner
 
 ## Usage
 
-### Scan a single IP
+### Scan single IP
 
 ```bash
-cargo run --release -- 8.8.8.8
+DNSScanner -t 8.8.8.8
 ```
 
 ---
 
-### Scan a CIDR range
+### Scan CIDR range
 
 ```bash
-cargo run --release -- 8.8.8.0/24
+DNSScanner -t 8.8.8.0/24
 ```
 
 ---
 
 ### Scan from file
 
-Create a file:
+Example file:
 
 ```
 ips.txt
@@ -90,14 +97,12 @@ ips.txt
 Run:
 
 ```bash
-cargo run --release -- ips.txt
+DNSScanner -t ips.txt
 ```
 
 ---
 
-## Output
-
-Example console output:
+## Example Output
 
 ```
 [DNS] 8.8.8.8
@@ -107,7 +112,7 @@ Example console output:
 Total live DNS found: 3
 ```
 
-Detected DNS servers are written to:
+Detected DNS servers are saved to:
 
 ```
 live_dns.txt
@@ -115,31 +120,28 @@ live_dns.txt
 
 ---
 
-## How it works
+## How It Works
 
-The scanner:
-
-1. Expands input targets (CIDR / file / IP)
+1. Expands input targets (single IP, CIDR, or file list)
 2. Sends asynchronous UDP DNS queries to port 53
-3. Waits for DNS responses
-4. Logs responding servers
-5. Writes results to output file
+3. Waits for responses concurrently
+4. Identifies responding DNS servers
+5. Logs active DNS servers to output file
 6. Displays total number of live DNS servers
 
-This method allows extremely fast DNS discovery compared to sequential scanning.
+This asynchronous approach enables extremely fast scanning compared to sequential methods.
 
 ---
 
 ## Performance Tips
 
-* Always use release mode:
+* Always run in release mode:
 
-```bash
-cargo run --release -- <target>
-```
-
-* Scan large networks from a VPS or high‑bandwidth environment
-* Avoid scanning extremely large ranges without rate limiting
+  ```bash
+  DNSScanner -t  <target>
+  ```
+* Use VPS or high-bandwidth environments for large scans
+* Avoid scanning extremely large ranges without authorization
 
 ---
 
@@ -147,10 +149,10 @@ cargo run --release -- <target>
 
 This project is intended for:
 
-* Network research
 * DNS infrastructure discovery
-* Learning async Rust networking
-* Security laboratory environments
+* Network measurement research
+* Async Rust networking practice
+* Security laboratory testing
 
 Ensure you have authorization before scanning networks you do not own.
 
@@ -158,17 +160,5 @@ Ensure you have authorization before scanning networks you do not own.
 
 ## License
 
-GPL-3.0 license
-
----
-
-## Future Improvements
-
-Planned enhancements:
-
-* Recursive resolver detection
-* Rate limiting / adaptive concurrency
-* JSON output support
-* DNS type detection (authoritative vs resolver)
-* Mass‑scale scanning mode
+GPL-3.0
 
