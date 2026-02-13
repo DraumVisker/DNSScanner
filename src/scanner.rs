@@ -1,65 +1,100 @@
-use futures::stream::{FuturesUnordered, StreamExt};
-use std::fs::OpenOptions;
+use std::fs::File;
 use std::io::Write;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
+
 use tokio::net::UdpSocket;
+use tokio::sync::{Semaphore, mpsc};
 use tokio::time::{timeout, Duration};
 
-pub async fn scan_all(ips: Vec<IpAddr>, outfile: &str) {
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(outfile)
-        .unwrap();
+pub async fn run_scan(
+    targets: Vec<Ipv4Addr>,
+    resolver: String,
+    concurrency: usize,
+    output_file: String,
+) {
+    let semaphore = Arc::new(Semaphore::new(concurrency));
+    let live_counter = Arc::new(AtomicUsize::new(0));
 
-    let counter = Arc::new(AtomicUsize::new(0));
+    let (tx, mut rx) = mpsc::channel::<Ipv4Addr>(10000);
 
-    let mut tasks = FuturesUnordered::new();
+    // Writer Task
+    let counter_clone = live_counter.clone();
+    tokio::spawn(async move {
+        let mut file = File::create(output_file).expect("Cannot create output file");
 
-    for ip in ips {
-        let counter_clone = counter.clone();
-        tasks.push(scan_ip(ip, counter_clone));
-    }
-
-    while let Some(result) = tasks.next().await {
-        if let Some(ip) = result {
-            println!("ACTIVE [UDP] {}", ip);
-            writeln!(file, "{}", ip).unwrap();
+        while let Some(ip) = rx.recv().await {
+            println!("[LIVE] {}", ip);
+            writeln!(file, "{}", ip).ok();
+            counter_clone.fetch_add(1, Ordering::Relaxed);
         }
+    });
+
+    // Spawn scan tasks
+    for ip in targets {
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let tx_clone = tx.clone();
+        let resolver_clone = resolver.clone();
+
+        tokio::spawn(async move {
+            let _p = permit;
+
+            if query_dns(ip, &resolver_clone).await {
+                tx_clone.send(ip).await.ok();
+            }
+        });
     }
+
+    drop(tx);
+
+    // Give tasks time to finish
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     println!(
-        "\nTotal live DNS found: {}",
-        counter.load(Ordering::Relaxed)
+        "\nScan complete. Total LIVE DNS: {}",
+        live_counter.load(Ordering::Relaxed)
     );
 }
 
-async fn scan_ip(ip: IpAddr, counter: Arc<AtomicUsize>) -> Option<IpAddr> {
-    let addr = SocketAddr::new(ip, 53);
+async fn query_dns(ip: Ipv4Addr, resolver: &str) -> bool {
+    let socket = match UdpSocket::bind("0.0.0.0:0").await {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
 
-    let socket = UdpSocket::bind("0.0.0.0:0").await.ok()?;
+    let resolver_addr: SocketAddr =
+        format!("{}:53", resolver).parse().expect("Invalid resolver");
 
-    let dns_query: [u8; 32] = [
-        0x12,0x34,0x01,0x00,0x00,0x01,0x00,0x00,
-        0x00,0x00,0x00,0x00,0x06,0x67,0x6f,0x6f,
-        0x67,0x6c,0x65,0x03,0x63,0x6f,0x6d,0x00,
-        0x00,0x01,0x00,0x01,0x00,0x00,0x00,0x00
-    ];
+    let packet = build_dns_packet();
 
-    let _ = socket.send_to(&dns_query, addr).await.ok()?;
+    if socket.send_to(&packet, resolver_addr).await.is_err() {
+        return false;
+    }
 
     let mut buf = [0u8; 512];
 
-    let res = timeout(Duration::from_secs(2), socket.recv_from(&mut buf)).await;
-
-    if res.is_ok() {
-        counter.fetch_add(1, Ordering::Relaxed);
-        return Some(ip);
+    match timeout(Duration::from_secs(2), socket.recv_from(&mut buf)).await {
+        Ok(Ok(_)) => true,
+        _ => false,
     }
+}
 
-    None
+fn build_dns_packet() -> Vec<u8> {
+    vec![
+        0x12, 0x34,
+        0x01, 0x00,
+        0x00, 0x01,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x03, b'w', b'w', b'w',
+        0x06, b'g', b'o', b'o', b'g', b'l', b'e',
+        0x03, b'c', b'o', b'm',
+        0x00,
+        0x00, 0x01,
+        0x00, 0x01,
+    ]
 }

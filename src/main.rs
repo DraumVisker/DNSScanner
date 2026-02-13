@@ -1,13 +1,24 @@
-mod scanner;
 mod ip_utils;
+mod scanner;
 
 use clap::Parser;
-use std::net::IpAddr;
 
 #[derive(Parser)]
+#[command(author, version, about)]
 struct Args {
+    /// Target (CIDR / IP / file.txt)
+    #[arg(short, long)]
     target: String,
 
+    /// DNS resolver
+    #[arg(short, long, default_value = "8.8.8.8")]
+    resolver: String,
+
+    /// Concurrency
+    #[arg(short, long, default_value_t = 2000)]
+    concurrency: usize,
+
+    /// Output file
     #[arg(short, long, default_value = "live_dns.txt")]
     output: String,
 }
@@ -16,9 +27,13 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    let ips: Vec<IpAddr> = ip_utils::parse_target(&args.target);
+    let targets = ip_utils::load_targets(&args.target);
 
-    println!("Loaded {} IPs", ips.len());
-
-    scanner::scan_all(ips, &args.output).await;
+    scanner::run_scan(
+        targets,
+        args.resolver,
+        args.concurrency,
+        args.output,
+    )
+        .await;
 }

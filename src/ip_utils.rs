@@ -1,19 +1,24 @@
-use ipnetwork::IpNetwork;
-use std::fs;
-use std::net::IpAddr;
+use ipnetwork::Ipv4Network;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::net::Ipv4Addr;
 
-pub fn parse_target(target: &str) -> Vec<IpAddr> {
-    if target.contains('/') {
-        let net: IpNetwork = target.parse().unwrap();
-        return net.iter().collect();
-    }
-
-    if let Ok(content) = fs::read_to_string(target) {
-        return content
+pub fn load_targets(input: &str) -> Vec<Ipv4Addr> {
+    // If file
+    if input.ends_with(".txt") {
+        let file = File::open(input).expect("Failed to open file");
+        return BufReader::new(file)
             .lines()
-            .filter_map(|l| l.parse().ok())
+            .filter_map(|l| l.ok()?.parse().ok())
             .collect();
     }
 
-    vec![target.parse().unwrap()]
+    // If CIDR
+    if input.contains('/') {
+        let network: Ipv4Network = input.parse().expect("Invalid CIDR");
+        return network.iter().collect();
+    }
+
+    // Single IP
+    vec![input.parse().expect("Invalid IP")]
 }
