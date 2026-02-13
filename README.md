@@ -13,18 +13,7 @@ The project supports:
 * Automatic output of live DNS servers
 * Live DNS counter display
 
----
 
-## Features
-
-* Async UDP DNS probing
-* Thousands of concurrent scans
-* CIDR / file / single‑IP input support
-* Output results saved to file
-* Real‑time console output
-* Total live DNS counter at completion
-
----
 
 ## Project Structure
 
@@ -111,9 +100,9 @@ cargo run --release -- ips.txt
 Example console output:
 
 ```
-ACTIVE [UDP] 8.8.8.8
-ACTIVE [UDP] 1.1.1.1
-ACTIVE [UDP] 9.9.9.9
+[DNS] 8.8.8.8
+[DNS] 1.1.1.1
+[DNS] 9.9.9.9
 
 Total live DNS found: 3
 ```
